@@ -17,6 +17,7 @@ await connectCloudinary();
 
 const allowedOrigins = [
   process.env.CLIENT_URL,
+  'https://quick-ai-nine-chi.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
@@ -26,10 +27,10 @@ app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps, curl, k6, or server-to-server)
-      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app') || origin.includes('localhost') || process.env.NODE_ENV !== 'production') {
         return callback(null, true);
       }
-      return callback(new Error('Blocked by CORS policy'));
+      return callback(null, false);
     },
     credentials: true,
   })
@@ -95,3 +96,4 @@ app.listen(PORT, () => {
 });
 
 export default app;
+

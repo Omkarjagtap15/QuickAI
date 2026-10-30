@@ -27,6 +27,8 @@ const AI = new OpenAI({
   baseURL: aiBaseUrl,
 });
 
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+
 // Helper to safely delete uploaded temp files
 function cleanupFile(filePath) {
   if (filePath && fs.existsSync(filePath)) {
@@ -100,7 +102,7 @@ export const generateArticle = async (req, res) => {
     const serverPrompt = buildArticlePrompt(topic, length);
 
     const response = await geminiChatBreaker.fire({
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       messages: [{ role: 'user', content: serverPrompt }],
       temperature: 0.7,
       max_tokens: length,
@@ -119,7 +121,7 @@ export const generateArticle = async (req, res) => {
     logAiMetric({
       userId,
       tool: 'generate-article',
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       promptTokens: usage.prompt_tokens,
       completionTokens: usage.completion_tokens,
       latencyMs: Date.now() - startTime,
@@ -137,7 +139,7 @@ export const generateArticle = async (req, res) => {
     logAiMetric({
       userId,
       tool: 'generate-article',
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       latencyMs: Date.now() - startTime,
       status: 'failed',
       error,
@@ -180,7 +182,7 @@ export const generateArticleStream = async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
 
     const stream = await AI.chat.completions.create({
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       messages: [{ role: 'user', content: serverPrompt }],
       temperature: 0.7,
       max_tokens: length,
@@ -242,7 +244,7 @@ export const generateBlogTitle = async (req, res) => {
     const serverPrompt = buildBlogTitlePrompt(keyword, category);
 
     const response = await geminiChatBreaker.fire({
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       messages: [{ role: 'user', content: serverPrompt }],
       temperature: 0.7,
       max_tokens: 120,
@@ -259,7 +261,7 @@ export const generateBlogTitle = async (req, res) => {
     logAiMetric({
       userId,
       tool: 'generate-blog-title',
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       promptTokens: usage.prompt_tokens,
       completionTokens: usage.completion_tokens,
       latencyMs: Date.now() - startTime,
@@ -488,7 +490,7 @@ export const resumeReview = async (req, res) => {
     const prompt = `You are an expert tech recruiter and hiring manager. Review the following resume thoroughly. Highlight 3 key strengths, 3 critical weaknesses/gaps, and 3 actionable recommendations to improve impact and ATS scoring.\n\nResume Content:\n${pdfData.text.slice(0, 8000)}`;
 
     const response = await geminiChatBreaker.fire({
-      model: 'gemini-2.0-flash',
+      model: GEMINI_MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
       max_tokens: 1000,
@@ -546,3 +548,5 @@ export const streamJobStatus = async (req, res) => {
     jobEvents.off(`job:${jobId}`, onUpdate);
   });
 };
+
+

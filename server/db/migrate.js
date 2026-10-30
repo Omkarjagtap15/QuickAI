@@ -13,10 +13,41 @@ if (!process.env.DATABASE_URL) {
 
 const sql = neon(process.env.DATABASE_URL);
 
+function parseSqlStatements(content) {
+  const statements = [];
+  let current = '';
+  let inDollarBlock = false;
+
+  const lines = content.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('--')) continue; // Skip comment lines
+
+    if (trimmed.includes('$$')) {
+      inDollarBlock = !inDollarBlock;
+    }
+
+    current += line + '\n';
+
+    if (!inDollarBlock && trimmed.endsWith(';')) {
+      const stmt = current.trim();
+      if (stmt.length > 0) {
+        statements.push(stmt);
+      }
+      current = '';
+    }
+  }
+
+  if (current.trim().length > 0) {
+    statements.push(current.trim());
+  }
+
+  return statements;
+}
+
 async function runMigrations() {
   console.log('🚀 Running database migrations...');
 
-  // 1. Ensure migrations tracking table exists
   await sql`
     CREATE TABLE IF NOT EXISTS _migrations (
       id SERIAL PRIMARY KEY,
@@ -42,11 +73,13 @@ async function runMigrations() {
 
     console.log(`  ▶  Applying migration: ${file}...`);
     const filePath = path.join(migrationsDir, file);
-    const sqlContent = fs.readFileSync(filePath, 'utf-8');
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const statements = parseSqlStatements(content);
 
     try {
-      // Execute raw migration string
-      await sql(sqlContent);
+      for (const statement of statements) {
+        await sql.query(statement);
+      }
       await sql`INSERT INTO _migrations (name) VALUES (${file})`;
       console.log(`  ✅ Successfully applied: ${file}`);
     } catch (err) {

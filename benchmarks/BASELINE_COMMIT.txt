@@ -1,0 +1,4 @@
+BASELINE_COMMIT=8a4eabace19da445a8cb8068949c52ae210b6d22
+TAG=v1-baseline
+DATE=2026-10-30
+DESCRIPTION=QuickAI baseline state prior to concurrency, resilience, and data integrity fixes.

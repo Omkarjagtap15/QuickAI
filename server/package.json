@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "server": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "db:migrate": "node db/migrate.js",
+    "db:seed": "node db/seed.js"
   },
   "keywords": [],
   "author": "",
@@ -19,8 +21,10 @@
     "cors": "^2.8.5",
     "dotenv": "^17.0.1",
     "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
     "multer": "^2.0.1",
     "openai": "^5.8.2",
+    "opossum": "^8.4.0",
     "pdf-parse": "^1.1.1"
   },
   "devDependencies": {

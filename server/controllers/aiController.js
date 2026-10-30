@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import axios from 'axios';
 import { v2 as cloudinary } from 'cloudinary';
+import connectCloudinary from '../configs/cloudinary.js';
 import fs from 'fs';
 import pdf from 'pdf-parse/lib/pdf-parse.js';
 import sql from '../configs/db.js';
@@ -349,6 +350,7 @@ export const generateImage = async (req, res) => {
     const { data } = await clipdropBreaker.fire(formData);
     const base64Image = `data:image/png;base64,${Buffer.from(data).toString('base64')}`;
 
+    await connectCloudinary();
     const { secure_url } = await cloudinary.uploader.upload(base64Image, {
       folder: 'quickai_creations',
     });
@@ -399,6 +401,7 @@ export const generateImageAsync = async (req, res) => {
 
       const { data } = await clipdropBreaker.fire(formData);
       const base64Image = `data:image/png;base64,${Buffer.from(data).toString('base64')}`;
+      await connectCloudinary();
       const { secure_url } = await cloudinary.uploader.upload(base64Image, {
         folder: 'quickai_creations',
       });
@@ -441,6 +444,7 @@ export const removeImageBackground = async (req, res) => {
   }
 
   try {
+    await connectCloudinary();
     const { secure_url } = await cloudinary.uploader.upload(image.path, {
       folder: 'quickai_bg_remove',
       transformation: [{ effect: 'background_removal', background_removal: 'remove_the_background' }],
@@ -490,6 +494,7 @@ export const removeImageObject = async (req, res) => {
 
   try {
     const { object } = validation.data;
+    await connectCloudinary();
     const { public_id } = await cloudinary.uploader.upload(image.path, {
       folder: 'quickai_obj_remove',
     });

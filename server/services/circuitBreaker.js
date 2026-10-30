@@ -10,10 +10,10 @@ import { logger } from './logger.js';
  */
 
 const breakerOptions = {
-  timeout: 10000, // 10s timeout on external calls
+  timeout: 45000, // 10s timeout on external calls
   errorThresholdPercentage: 50, // Trip breaker if 50% fail
   resetTimeout: 30000, // Try again after 30s
-  rollingCountTimeout: 10000,
+  rollingCounttimeout: 45000,
   rollingCountBuckets: 10,
 };
 
@@ -51,3 +51,4 @@ export function createBreaker(fn, name, fallbackFn) {
   setupBreakerEvents(breaker, name);
   return breaker;
 }
+

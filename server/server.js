@@ -66,6 +66,7 @@ app.get('/health', async (req, res) => {
     database: dbStatus,
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
+    envKeys: { gemini: Boolean(process.env.GEMINI_API_KEY), clipdrop: Boolean(process.env.CLIPDROP_API_KEY), cloudinary: Boolean(process.env.CLOUDINARY_API_KEY) },
     providers: {
       gemini: { status: 'operational', circuit: 'closed' },
       clipdrop: { status: 'operational', circuit: 'closed' },
@@ -96,4 +97,5 @@ app.listen(PORT, () => {
 });
 
 export default app;
+
 

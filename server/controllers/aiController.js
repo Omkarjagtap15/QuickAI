@@ -94,7 +94,6 @@ const geminiChatBreaker = createBreaker(
   async (params) => executeChatCompletion(params),
   'gemini-chat',
   async (params) => {
-    // Context-aware resilient fallback if all providers timeout or are unreachable
     const topic = params?.topic || params?.prompt?.slice(0, 50) || 'your topic';
     return {
       choices: [
@@ -121,7 +120,7 @@ const clipdropBreaker = createBreaker(
   'clipdrop-image'
 );
 
-// ── Article Generation (with Atomic Quota & Server-side Prompt) ──────────────────
+// ── Article Generation ───────────────────────────────────────────────────────────
 
 export const generateArticle = async (req, res) => {
   const startTime = Date.now();
@@ -195,7 +194,7 @@ export const generateArticle = async (req, res) => {
   }
 };
 
-// ── SSE Streaming Article Generation (Perceived Latency Optimizer) ───────────────
+// ── SSE Streaming Article Generation ─────────────────────────────────────────────
 
 export const generateArticleStream = async (req, res) => {
   const userId = req.userId;
@@ -318,18 +317,11 @@ export const generateBlogTitle = async (req, res) => {
   }
 };
 
-// ── Image Generation (Synchronous & Async Job Support) ──────────────────────────
+// ── Image Generation ─────────────────────────────────────────────────────────────
 
 export const generateImage = async (req, res) => {
   const userId = req.userId;
   const plan = req.plan;
-
-  if (plan !== 'premium') {
-    return res.status(403).json({
-      success: false,
-      message: 'This feature is only available for premium subscriptions',
-    });
-  }
 
   try {
     const validation = generateImageSchema.safeParse(req.body);
@@ -340,6 +332,14 @@ export const generateImage = async (req, res) => {
       });
     }
 
+    const quota = await checkAndIncrementQuota(userId, plan);
+    if (!quota.allowed) {
+      return res.status(429).json({
+        success: false,
+        message: `Free quota limit reached (${quota.currentCount}/${quota.limit}). Upgrade to Premium to continue.`,
+      });
+    }
+
     const { prompt, style, publish } = validation.data;
     const fullPrompt = `Generate a high quality image: ${prompt}, style: ${style}`;
 
@@ -347,9 +347,11 @@ export const generateImage = async (req, res) => {
     formData.append('prompt', fullPrompt);
 
     const { data } = await clipdropBreaker.fire(formData);
-    const base64Image = `data:image/png;base64,${Buffer.from(data, 'binary').toString('base64')}`;
+    const base64Image = `data:image/png;base64,${Buffer.from(data).toString('base64')}`;
 
-    const { secure_url } = await cloudinary.uploader.upload(base64Image);
+    const { secure_url } = await cloudinary.uploader.upload(base64Image, {
+      folder: 'quickai_creations',
+    });
 
     await sql`
       INSERT INTO creations (user_id, prompt, content, type, publish) 
@@ -368,18 +370,19 @@ export const generateImageAsync = async (req, res) => {
   const userId = req.userId;
   const plan = req.plan;
 
-  if (plan !== 'premium') {
-    return res.status(403).json({
-      success: false,
-      message: 'This feature is only available for premium subscriptions',
-    });
-  }
-
   const validation = generateImageSchema.safeParse(req.body);
   if (!validation.success) {
     return res.status(400).json({
       success: false,
       message: validation.error.errors[0]?.message || 'Invalid prompt',
+    });
+  }
+
+  const quota = await checkAndIncrementQuota(userId, plan);
+  if (!quota.allowed) {
+    return res.status(429).json({
+      success: false,
+      message: `Free quota limit reached (${quota.currentCount}/${quota.limit}). Upgrade to Premium to continue.`,
     });
   }
 
@@ -395,8 +398,10 @@ export const generateImageAsync = async (req, res) => {
       formData.append('prompt', fullPrompt);
 
       const { data } = await clipdropBreaker.fire(formData);
-      const base64Image = `data:image/png;base64,${Buffer.from(data, 'binary').toString('base64')}`;
-      const { secure_url } = await cloudinary.uploader.upload(base64Image);
+      const base64Image = `data:image/png;base64,${Buffer.from(data).toString('base64')}`;
+      const { secure_url } = await cloudinary.uploader.upload(base64Image, {
+        folder: 'quickai_creations',
+      });
 
       await sql`
         INSERT INTO creations (user_id, prompt, content, type, publish) 
@@ -422,20 +427,22 @@ export const removeImageBackground = async (req, res) => {
   const plan = req.plan;
   const image = req.file;
 
-  if (plan !== 'premium') {
-    cleanupFile(image?.path);
-    return res.status(403).json({
-      success: false,
-      message: 'This feature is only available for premium subscriptions',
-    });
-  }
-
   if (!image) {
     return res.status(400).json({ success: false, message: 'Image file is required' });
   }
 
+  const quota = await checkAndIncrementQuota(userId, plan);
+  if (!quota.allowed) {
+    cleanupFile(image.path);
+    return res.status(429).json({
+      success: false,
+      message: `Free quota limit reached (${quota.currentCount}/${quota.limit}). Upgrade to Premium to continue.`,
+    });
+  }
+
   try {
     const { secure_url } = await cloudinary.uploader.upload(image.path, {
+      folder: 'quickai_bg_remove',
       transformation: [{ effect: 'background_removal', background_removal: 'remove_the_background' }],
     });
 
@@ -459,29 +466,33 @@ export const removeImageObject = async (req, res) => {
   const plan = req.plan;
   const image = req.file;
 
-  if (plan !== 'premium') {
-    cleanupFile(image?.path);
-    return res.status(403).json({
-      success: false,
-      message: 'This feature is only available for premium subscriptions',
-    });
-  }
-
   if (!image) {
     return res.status(400).json({ success: false, message: 'Image file is required' });
   }
 
-  try {
-    const validation = removeImageObjectSchema.safeParse(req.body);
-    if (!validation.success) {
-      return res.status(400).json({
-        success: false,
-        message: validation.error.errors[0]?.message || 'Invalid object name',
-      });
-    }
+  const validation = removeImageObjectSchema.safeParse(req.body);
+  if (!validation.success) {
+    cleanupFile(image.path);
+    return res.status(400).json({
+      success: false,
+      message: validation.error.errors[0]?.message || 'Invalid object name',
+    });
+  }
 
+  const quota = await checkAndIncrementQuota(userId, plan);
+  if (!quota.allowed) {
+    cleanupFile(image.path);
+    return res.status(429).json({
+      success: false,
+      message: `Free quota limit reached (${quota.currentCount}/${quota.limit}). Upgrade to Premium to continue.`,
+    });
+  }
+
+  try {
     const { object } = validation.data;
-    const { public_id } = await cloudinary.uploader.upload(image.path);
+    const { public_id } = await cloudinary.uploader.upload(image.path, {
+      folder: 'quickai_obj_remove',
+    });
 
     const imageUrl = cloudinary.url(public_id, {
       transformation: [{ effect: `gen_remove:${encodeURIComponent(object)}` }],
@@ -508,14 +519,6 @@ export const resumeReview = async (req, res) => {
   const plan = req.plan;
   const resume = req.file;
 
-  if (plan !== 'premium') {
-    cleanupFile(resume?.path);
-    return res.status(403).json({
-      success: false,
-      message: 'This feature is only available for premium subscriptions',
-    });
-  }
-
   if (!resume) {
     return res.status(400).json({ success: false, message: 'Resume PDF is required' });
   }
@@ -523,6 +526,15 @@ export const resumeReview = async (req, res) => {
   if (resume.size > 5 * 1024 * 1024) {
     cleanupFile(resume.path);
     return res.status(400).json({ success: false, message: 'Resume file size exceeds allowed limit (5MB).' });
+  }
+
+  const quota = await checkAndIncrementQuota(userId, plan);
+  if (!quota.allowed) {
+    cleanupFile(resume.path);
+    return res.status(429).json({
+      success: false,
+      message: `Free quota limit reached (${quota.currentCount}/${quota.limit}). Upgrade to Premium to continue.`,
+    });
   }
 
   try {

@@ -11,6 +11,25 @@ A multi-provider AI content platform with **atomic quota metering**, **circuit-b
 
 ---
 
+## 📸 Platform Preview
+
+<div align="center">
+  <img src="docs/assets/hero-landing.png" alt="QuickAI Platform Landing Page" width="100%" style="border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.12);" />
+  <p><em>QuickAI Creator Platform — Production-ready multi-provider AI SaaS with zero-friction demo access</em></p>
+</div>
+
+<br />
+
+| AI Studio: Long-Form Article Generator | AI Studio: SEO Blog Titles Engine |
+| :---: | :---: |
+| <img src="docs/assets/write-article.png" alt="Write Article Studio" width="100%" style="border-radius: 8px;" /> | <img src="docs/assets/blog-titles.png" alt="SEO Blog Titles" width="100%" style="border-radius: 8px;" /> |
+
+| Instant Guest Demo (No Sign-Up Barrier) | Scalable Keyset Community Feed |
+| :---: | :---: |
+| <img src="docs/assets/demo-access.png" alt="Instant Guest Demo Mode" width="100%" style="border-radius: 8px;" /> | <img src="docs/assets/community-feed.png" alt="Community Feed" width="100%" style="border-radius: 8px;" /> |
+
+---
+
 ## What It Does
 
 QuickAI is an AI-powered content platform offering six tools behind a unified quota and resilience layer:
@@ -25,7 +44,7 @@ QuickAI is an AI-powered content platform offering six tools behind a unified qu
 | **Review Resume** | Parses uploaded PDF resumes and provides structured feedback | Google Gemini |
 | **Community Feed** | Paginated social feed with likes for published creations | — |
 
-> **Demo access:** Sign in with any email via the Clerk authentication flow. All tools are available on the free tier (10 requests). No credit card required.
+> **Instant Demo Access:** Evaluators and recruiters can click **"Launch Instant Demo"** directly on `/ai` to test all 6 AI tools with free quota (10 requests) with zero sign-up friction. Alternatively, sign in with any email via Clerk to save personal creations. No credit card required.
 
 ---
 

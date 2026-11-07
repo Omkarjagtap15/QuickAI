@@ -73,3 +73,21 @@ export async function getUserUsage(userId) {
     limit: rows[0].plan === 'premium' ? Infinity : FREE_TIER_LIMIT,
   };
 }
+
+/**
+ * Compensating decrement: refunds one quota unit when a provider call fails
+ * after quota was already consumed. This ensures users aren't penalized for
+ * upstream failures outside their control.
+ */
+export async function decrementQuota(userId) {
+  try {
+    await sql`
+      UPDATE usage
+      SET count = GREATEST(count - 1, 0), updated_at = NOW()
+      WHERE user_id = ${userId}
+    `;
+  } catch (err) {
+    // Log but don't throw — refund failure shouldn't crash the error response
+    console.error('Quota refund failed:', err.message);
+  }
+}

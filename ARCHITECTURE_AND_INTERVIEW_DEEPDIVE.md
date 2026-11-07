@@ -142,11 +142,13 @@ In the original baseline implementation, free-tier accounts were limited to 10 r
    ```
    * **Why this works:** PostgreSQL evaluates the `WHERE` clause and acquires a row-level lock atomically. If 50 transactions attempt to update the same row concurrently, they are serialized at the database engine level. The first 10 increment the count and return a row; the 11th through 50th evaluate `count < 10` as `FALSE` and return **0 rows**.
    * If `rows.length === 0`, the server immediately returns HTTP `429 Too Many Requests` without dispatching any upstream AI API calls.
+   * **Compensating Quota Refund:** If the third-party provider fails after quota was consumed, `decrementQuota(userId)` issues a compensating `UPDATE usage SET count = GREATEST(count - 1, 0)` so users are not penalized for upstream vendor outages.
 
 2. **Zero-Network-Hop Auth Middleware (`server/middlewares/auth.js`):**
    * Eliminated `clerkClient.users.getUser()` from the hot path entirely.
    * Session claims and user identity are extracted directly from the signed JWT payload (`req.auth().claims`) decoded in-memory.
    * Subscription plan checking (`req.auth().has({ plan: 'premium' })`) occurs in CPU cycles rather than over external HTTP hops.
+   * **Instant Guest/Demo Mode:** Supports `mock-token-guest` with zero sign-up friction, allowing recruiters and evaluators to test all 6 tools immediately.
 
 ---
 
@@ -203,14 +205,14 @@ Third-party generative AI models (diffusion models, LLMs, OCR/PDF parsing) take 
    * **Guaranteed Idempotency:** The composite primary key `(creation_id, user_id)` guarantees uniqueness at the database engine level.
    * **Atomic Toggle:** The toggle operation executes an atomic `INSERT ... ON CONFLICT DO NOTHING RETURNING *`. If 0 rows return, the server executes `DELETE ... WHERE creation_id = $1 AND user_id = $2`.
 
-2. **Keyset Cursor Pagination & Composite Partial Index (Migration `004_add_indexes.sql`):**
+2. **Composite Keyset Cursor Pagination & Partial Index (Migrations `004` & `007`):**
    * Created a targeted partial index covering the public feed:
      ```sql
      CREATE INDEX idx_creations_published_feed 
-     ON creations(created_at DESC) 
+     ON creations(created_at DESC, id DESC) 
      WHERE publish = true;
      ```
-   * Implemented **Keyset (Seek) Pagination** instead of `OFFSET/LIMIT`:
+   * Implemented **Composite Keyset (Seek) Pagination** with tie-breaking `id`:
      ```sql
      SELECT c.*,
             COALESCE(ARRAY_AGG(l.user_id) FILTER (WHERE l.user_id IS NOT NULL), '{}') AS likes,
@@ -218,12 +220,13 @@ Third-party generative AI models (diffusion models, LLMs, OCR/PDF parsing) take 
             BOOL_OR(l.user_id = $1) AS is_liked
      FROM creations c
      LEFT JOIN likes l ON c.id = l.creation_id
-     WHERE c.publish = true AND c.created_at < $2::timestamp
+     WHERE c.publish = true 
+       AND (c.created_at, c.id) < ($cursor::timestamptz, $cursorId)
      GROUP BY c.id
-     ORDER BY c.created_at DESC
+     ORDER BY c.created_at DESC, c.id DESC
      LIMIT 20;
      ```
-   * **Why Keyset beats Offset:** Offset pagination (`LIMIT 20 OFFSET 50000`) forces the database engine to scan and discard 50,000 rows. Keyset pagination jumps directly to the indexed timestamp via B-Tree traversal in **O(log N)** time.
+   * **Why Keyset beats Offset:** Offset pagination (`LIMIT 20 OFFSET 50000`) forces the database engine to scan and discard 50,000 rows. Keyset pagination jumps directly to the indexed timestamp and ID via B-Tree traversal in **O(log N)** time without skipping or duplicating records when timestamps tie.
 
 ---
 
@@ -238,9 +241,9 @@ Third-party generative AI models (diffusion models, LLMs, OCR/PDF parsing) take 
    * Implemented a zero-dependency schema validator enforcing length bounds, regex sanitization, and structured parameters.
    * All final prompts sent to AI engines are assembled strictly server-side (e.g., `buildArticlePrompt(topic, length)`), isolating user input as sanitized data arguments.
    * Server enforces a hard ceiling on output tokens (`max_tokens: 1600` for articles, `max_tokens: 120` for blog titles), discarding client override attempts.
-2. **Automated Inode Garbage Collection (`cleanupFile`):**
+2. **Non-Blocking Inode Garbage Collection (`cleanupFile`):**
    * Wrapped all file-handling operations in strict `try ... finally` blocks.
-   * Temporary files uploaded by Multer are unconditionally unlinked (`fs.unlinkSync`) immediately after processing or upon any failure, preventing disk exhaustion.
+   * Temporary files uploaded by Multer are asynchronously unlinked via `fs/promises.unlink()` immediately after processing or upon any failure, preventing disk exhaustion without blocking the event loop.
 3. **Structured Observability & Cost Telemetry (`server/services/logger.js`):**
    * Built a zero-dependency structured JSON logger.
    * Every AI call logs `latencyMs`, `tokens.prompt`, `tokens.completion`, `totalTokens`, and precise micro-cent financial costs (`costUsd` based on Gemini pricing models) for complete operational auditability.
@@ -324,6 +327,7 @@ All database changes are managed via clean, idempotent SQL migrations executed u
   * `idx_creations_user_created ON creations(user_id, created_at DESC)` (Composite Index).
 * **`005_add_jobs_table.sql`:** Adds `jobs` table with JSONB payloads to support async BullMQ-style background workers and SSE progress tracking.
 * **`006_drop_likes_array.sql`:** Drops the legacy `creations.likes` array column after data migration verification, preventing schema drift.
+* **`007_composite_cursor_index.sql`:** Drops single-column partial index and creates composite index `idx_creations_published_feed ON creations(created_at DESC, id DESC) WHERE publish = true` for deterministic keyset pagination tie-breaking.
 
 ---
 

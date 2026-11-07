@@ -3,9 +3,10 @@ import axios from 'axios';
 import { v2 as cloudinary } from 'cloudinary';
 import connectCloudinary from '../configs/cloudinary.js';
 import fs from 'fs';
+import { unlink } from 'fs/promises';
 import pdf from 'pdf-parse/lib/pdf-parse.js';
 import sql from '../configs/db.js';
-import { checkAndIncrementQuota } from '../services/quotaService.js';
+import { checkAndIncrementQuota, decrementQuota } from '../services/quotaService.js';
 import { createBreaker } from '../services/circuitBreaker.js';
 import { enqueueJob, getJobById, jobEvents } from '../services/jobQueue.js';
 import { logAiMetric, logger } from '../services/logger.js';
@@ -29,12 +30,14 @@ const AI = new OpenAI({
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 
-// Helper to safely delete uploaded temp files
-function cleanupFile(filePath) {
-  if (filePath && fs.existsSync(filePath)) {
-    try {
-      fs.unlinkSync(filePath);
-    } catch (e) {
+// Helper to safely delete uploaded temp files (non-blocking)
+async function cleanupFile(filePath) {
+  if (!filePath) return;
+  try {
+    await unlink(filePath);
+  } catch (e) {
+    // ENOENT is fine (already deleted), log anything else
+    if (e.code !== 'ENOENT') {
       logger.warn({ event: 'temp_file_cleanup_failed', path: filePath, error: e.message });
     }
   }
@@ -182,6 +185,7 @@ export const generateArticle = async (req, res) => {
       },
     });
   } catch (error) {
+    await decrementQuota(userId);
     logAiMetric({
       userId,
       tool: 'generate-article',
@@ -314,6 +318,7 @@ export const generateBlogTitle = async (req, res) => {
 
     return res.json({ success: true, content });
   } catch (error) {
+    await decrementQuota(userId);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -362,6 +367,7 @@ export const generateImage = async (req, res) => {
 
     return res.json({ success: true, content: secure_url });
   } catch (error) {
+    await decrementQuota(userId);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -457,6 +463,7 @@ export const removeImageBackground = async (req, res) => {
 
     return res.json({ success: true, content: secure_url });
   } catch (error) {
+    await decrementQuota(userId);
     return res.status(500).json({ success: false, message: error.message });
   } finally {
     cleanupFile(image.path);
@@ -511,6 +518,7 @@ export const removeImageObject = async (req, res) => {
 
     return res.json({ success: true, content: imageUrl });
   } catch (error) {
+    await decrementQuota(userId);
     return res.status(500).json({ success: false, message: error.message });
   } finally {
     cleanupFile(image.path);
@@ -564,6 +572,7 @@ export const resumeReview = async (req, res) => {
 
     return res.json({ success: true, content });
   } catch (error) {
+    await decrementQuota(userId);
     return res.status(500).json({ success: false, message: error.message });
   } finally {
     cleanupFile(resume.path);

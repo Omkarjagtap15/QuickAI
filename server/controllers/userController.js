@@ -6,7 +6,8 @@ import sql from '../configs/db.js';
  * Optimizations:
  * 1. Normalized likes: atomic toggle via INSERT ... ON CONFLICT DO NOTHING / DELETE
  *    Eliminates read-modify-write lost updates under concurrency.
- * 2. Keyset pagination for community feed (replaces full unindexed table scans).
+ * 2. Keyset pagination with composite cursor (created_at, id) for deterministic
+ *    ordering even when timestamps tie.
  * 3. SQL aggregation for like counts and user like status.
  */
 
@@ -22,7 +23,7 @@ export const getUserCreations = async (req, res) => {
       LEFT JOIN likes l ON c.id = l.creation_id
       WHERE c.user_id = ${userId}
       GROUP BY c.id
-      ORDER BY c.created_at DESC
+      ORDER BY c.created_at DESC, c.id DESC
     `;
 
     res.json({ success: true, creations });
@@ -35,10 +36,13 @@ export const getPublishedCreations = async (req, res) => {
   try {
     const userId = req.userId;
     const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10), 1), 100);
-    const cursor = req.query.cursor ? new Date(req.query.cursor).toISOString() : null;
+    const cursorTime = req.query.cursor || null;
+    const cursorId = req.query.cursorId ? parseInt(req.query.cursorId, 10) : null;
 
     let creations;
-    if (cursor) {
+    if (cursorTime && cursorId) {
+      // Composite keyset: WHERE (created_at, id) < ($cursor, $cursorId)
+      // Prevents row skipping/duplication when timestamps tie.
       creations = await sql`
         SELECT c.*,
                COALESCE(ARRAY_AGG(l.user_id) FILTER (WHERE l.user_id IS NOT NULL), '{}') AS likes,
@@ -46,9 +50,10 @@ export const getPublishedCreations = async (req, res) => {
                BOOL_OR(l.user_id = ${userId}) AS is_liked
         FROM creations c
         LEFT JOIN likes l ON c.id = l.creation_id
-        WHERE c.publish = true AND c.created_at < ${cursor}::timestamp
+        WHERE c.publish = true
+          AND (c.created_at, c.id) < (${cursorTime}::timestamptz, ${cursorId})
         GROUP BY c.id
-        ORDER BY c.created_at DESC
+        ORDER BY c.created_at DESC, c.id DESC
         LIMIT ${limit}
       `;
     } else {
@@ -61,19 +66,19 @@ export const getPublishedCreations = async (req, res) => {
         LEFT JOIN likes l ON c.id = l.creation_id
         WHERE c.publish = true
         GROUP BY c.id
-        ORDER BY c.created_at DESC
+        ORDER BY c.created_at DESC, c.id DESC
         LIMIT ${limit}
       `;
     }
 
-    const nextCursor =
-      creations.length === limit ? creations[creations.length - 1].created_at : null;
+    const lastItem = creations.length === limit ? creations[creations.length - 1] : null;
 
     res.json({
       success: true,
       creations,
-      nextCursor,
-      hasMore: Boolean(nextCursor),
+      nextCursor: lastItem ? lastItem.created_at : null,
+      nextCursorId: lastItem ? lastItem.id : null,
+      hasMore: Boolean(lastItem),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -11,16 +11,20 @@ const Community = () => {
   const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [nextCursor, setNextCursor] = useState(null);
+  const [nextCursorId, setNextCursorId] = useState(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const { getToken } = useAuth();
 
-  const fetchCreations = async (cursor = null) => {
+  const fetchCreations = async (cursor = null, cursorId = null) => {
     try {
-      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}&limit=20` : '?limit=20';
-      const { data } = await axios.get(`/api/user/get-published-creations${query}`, {
-        headers: { Authorization: `Bearer ${await getToken()}` },
-      });
+      let query = '?limit=20';
+      if (cursor && cursorId) {
+        query = `?cursor=${encodeURIComponent(cursor)}&cursorId=${encodeURIComponent(cursorId)}&limit=20`;
+      }
+      const token = await getToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const { data } = await axios.get(`/api/user/get-published-creations${query}`, { headers });
 
       if (data.success) {
         if (cursor) {
@@ -29,6 +33,7 @@ const Community = () => {
           setCreations(data.creations);
         }
         setNextCursor(data.nextCursor);
+        setNextCursorId(data.nextCursorId);
         setHasMore(data.hasMore);
       } else {
         toast.error(data.message);
@@ -41,46 +46,52 @@ const Community = () => {
   };
 
   const handleLoadMore = () => {
-    if (nextCursor && !loadingMore) {
+    if (nextCursor && nextCursorId && !loadingMore) {
       setLoadingMore(true);
-      fetchCreations(nextCursor);
+      fetchCreations(nextCursor, nextCursorId);
     }
   };
 
   // Optimistic & atomic like toggle: updates state in-place without refetching the full database
   const imageLikeToggle = async (id) => {
-    if (!user) return;
-    const userId = user.id;
+    const isGuest = sessionStorage.getItem('quickai_guest_mode');
+    if (!user && !isGuest) {
+      toast.error('Please sign in or continue as guest to like creations');
+      return;
+    }
+    const userId = user?.id || 'mock-token-guest';
 
     // Optimistically update UI
     setCreations((prev) =>
       prev.map((c) => {
         if (c.id !== id) return c;
-        const alreadyLiked = Array.isArray(c.likes) && c.likes.includes(userId);
+        const alreadyLiked = (Array.isArray(c.likes) && c.likes.includes(userId)) || c.is_liked;
         const updatedLikes = alreadyLiked
-          ? c.likes.filter((uid) => uid !== userId)
-          : [...(c.likes || []), userId];
+          ? (Array.isArray(c.likes) ? c.likes.filter((uid) => uid !== userId) : [])
+          : [...(Array.isArray(c.likes) ? c.likes : []), userId];
 
         return {
           ...c,
           likes: updatedLikes,
-          like_count: updatedLikes.length,
+          like_count: Math.max(0, (c.like_count || 0) + (alreadyLiked ? -1 : 1)),
+          is_liked: !alreadyLiked,
         };
       })
     );
 
     try {
+      const token = await getToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
       const { data } = await axios.post(
         '/api/user/toggle-like-creation',
         { id },
-        { headers: { Authorization: `Bearer ${await getToken()}` } }
+        { headers }
       );
 
       if (data.success) {
         toast.success(data.message);
       } else {
         toast.error(data.message);
-        // Rollback on failure
         fetchCreations();
       }
     } catch (error) {
@@ -90,9 +101,7 @@ const Community = () => {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchCreations();
-    }
+    fetchCreations();
   }, [user]);
 
   return !loading ? (
@@ -100,7 +109,7 @@ const Community = () => {
       <div className='flex justify-between items-center'>
         <h1 className='text-xl font-semibold text-slate-800'>Community Creations</h1>
         <span className='text-xs text-slate-500 font-medium'>
-          Showing {creations.length} creations • Keyset paginated
+          Showing {creations.length} creations • Composite Keyset Paginated
         </span>
       </div>
 
@@ -108,7 +117,9 @@ const Community = () => {
         <div className='flex flex-wrap gap-4'>
           {creations.map((creation) => {
             const isLiked =
-              user && Array.isArray(creation.likes) && creation.likes.includes(user.id);
+              Boolean(creation.is_liked) ||
+              (user && Array.isArray(creation.likes) && creation.likes.includes(user.id)) ||
+              (Array.isArray(creation.likes) && creation.likes.includes('mock-token-guest'));
             const count =
               typeof creation.like_count === 'number'
                 ? creation.like_count
